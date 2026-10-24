@@ -1,0 +1,36 @@
+# Agent roles: presets for the "+ Agent" form (and, from phase 2, for agents
+# that spawn other agents). Picking a role fills in provider, model, effort, and
+# the MCP servers the agent may use; every field can still be changed per agent.
+# provider: claude | codex | openai   model: optional, provider default if omitted
+# effort: low | medium | high (optional)
+# mcp: server names from mcp.yaml (omit = all enabled). openai can only use http servers.
+# worktree: true = work in a separate git worktree; changes are reviewed and merged by you.
+
+roles:
+  lead:
+    description: Breaks a goal into work, delegates it, and reports back.
+    provider: claude
+    effort: high
+  code_worker:
+    description: Modifies, refactors, or debugs code in the working repository and runs tests.
+    provider: codex
+    effort: medium
+    mcp: [linear]
+    worktree: true
+  researcher:
+    description: Research, analysis, long-form writing, or creating/updating Nuclino documents.
+    provider: claude
+    mcp: [nuclino, linear]
+  issue_tracker:
+    description: Reads, creates, or updates Linear issues, projects, and cycles.
+    provider: claude
+    mcp: [linear]
+  quick_ops:
+    description: Short lookups and summaries such as summarizing a Slack channel or searching Nuclino.
+    provider: openai
+    effort: low
+    mcp: [slack, nuclino]
+  communicator:
+    description: Checks the calendar, schedules or changes events, and drafts or sends Slack messages.
+    provider: claude
+    mcp: [slack, google_calendar]
