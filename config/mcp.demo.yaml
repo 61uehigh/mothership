@@ -1,0 +1,22 @@
+# Demo stand-ins for the real tools, with made-up data. `pnpm dev:demo` uses it
+# (with config/dashboard.demo.yaml).
+# Agents also see these servers, so do not use demo mode for real work.
+# ${APP_ROOT} is the app's own folder, so agents in other folders find the script.
+
+servers:
+  google_calendar:
+    transport: stdio
+    command: node
+    args: ["${APP_ROOT}/scripts/demo-mcp.mjs", "calendar"]
+  linear:
+    transport: stdio
+    command: node
+    args: ["${APP_ROOT}/scripts/demo-mcp.mjs", "linear"]
+  slack:
+    transport: stdio
+    command: node
+    args: ["${APP_ROOT}/scripts/demo-mcp.mjs", "slack"]
+  nuclino:
+    transport: stdio
+    command: node
+    args: ["${APP_ROOT}/scripts/demo-mcp.mjs", "nuclino"]

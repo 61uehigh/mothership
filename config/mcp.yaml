@@ -1,0 +1,67 @@
+# MCP servers shared by every agent. Secrets use ${ENV_VAR} and are read from
+# .env.local — never write real tokens in this file.
+# transport: http  -> url, headers      (usable by claude, codex, openai)
+# transport: stdio -> command, args, env (claude and codex only; openai skips it)
+# A server is on unless it says enabled: false (or Settings turns it off); an
+# enabled server with an unset variable shows as not connected until you set it.
+# ${APP_ROOT} stands for the app's own folder.
+
+# Servers you have not enabled below can still be used by Claude agents through
+# the matching claude.ai connector, when you run under a `claude` login and the
+# connector is connected in claude.ai. Codex and OpenAI agents cannot use these.
+claudeConnectors:
+  slack: Slack
+  google_calendar: Google Calendar
+  linear: Linear
+  nuclino: Nuclino
+
+servers:
+  # Linear remote MCP. A personal API key works as a bearer token.
+  # Key: create a personal API key in Linear settings (API section).
+  linear:
+    enabled: true
+    transport: http
+    url: https://mcp.linear.app/mcp
+    headers:
+      Authorization: Bearer ${LINEAR_API_KEY}
+
+  # Nuclino official remote MCP. Clients without OAuth use an API key as a bearer token.
+  # Key: Nuclino profile settings > API Keys. Revoke the key to disconnect.
+  # https://help.nuclino.com/70af7f4f-connect-nuclino-to-ai-assistants-with-mcp
+  nuclino:
+    enabled: true
+    transport: http
+    url: https://api.nuclino.com/mcp
+    headers:
+      Authorization: Bearer ${NUCLINO_API_KEY}
+
+  # Slack official remote MCP. No API keys or dynamic client registration: create an
+  # internal Slack app, add the user token scopes you need (search:read.*, channels:history,
+  # chat:write, ...), install it to the workspace, and use the resulting user token (xoxp-).
+  # Sending it as a bearer header is the standard MCP OAuth form but is not spelled out in
+  # Slack's docs — verify on first run.
+  # https://docs.slack.dev/ai/slack-mcp-server/
+  slack:
+    enabled: false
+    transport: http
+    url: https://mcp.slack.com/mcp
+    headers:
+      Authorization: Bearer ${SLACK_USER_TOKEN}
+
+  # Google Calendar via the community server nspady/google-calendar-mcp (stdio, refreshes
+  # its own OAuth tokens). One-time setup: create a "Desktop app" OAuth client in Google
+  # Cloud with the Calendar API enabled, add yourself as a test user, download the JSON,
+  # then run `npx @cocal/google-calendar-mcp auth` with GOOGLE_OAUTH_CREDENTIALS set.
+  # Test-mode tokens expire weekly; rerun the auth command when that happens.
+  # Not usable by the openai agent (stdio).
+  #
+  # Official alternative: https://calendarmcp.googleapis.com/mcp/v1 (HTTP, OAuth 2.0).
+  # It is a Developer Preview that needs program membership, and its access tokens
+  # expire hourly, so it needs a refresh flow this app does not have yet.
+  google_calendar:
+    enabled: false
+    transport: stdio
+    command: npx
+    args: ["-y", "@cocal/google-calendar-mcp@2.7.0"]
+    env:
+      GOOGLE_OAUTH_CREDENTIALS: ${GOOGLE_OAUTH_CREDENTIALS}
