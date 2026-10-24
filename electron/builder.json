@@ -1,0 +1,21 @@
+{
+  "appId": "io.github.61uehigh.mothership",
+  "productName": "Mothership",
+  "npmRebuild": false,
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "category": "public.app-category.developer-tools",
+    "identity": "-",
+    "hardenedRuntime": false
+  },
+  "dmg": {
+    "artifactName": "Mothership-${version}-${arch}.dmg"
+  }
+}
