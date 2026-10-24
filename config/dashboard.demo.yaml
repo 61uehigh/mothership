@@ -1,0 +1,47 @@
+# Dashboard for demo mode (`pnpm dev:demo`): every widget reads the made-up
+# demo servers from mcp.demo.yaml, never real tools or claude.ai connectors.
+# Each tool widget reads its MCP server (from mcp.yaml) directly, without an LLM.
+# A widget whose server is disabled or missing a key shows a setup hint instead.
+
+timezone: Asia/Seoul
+# How long fetched results are reused before the next automatic refresh.
+refreshSeconds: 120
+
+widgets:
+  - id: today
+    type: calendar
+    title: Today
+    server: google_calendar
+    calendars: [primary]
+
+  - id: my-issues
+    type: linear
+    title: My Linear issues
+    server: linear
+    # Linear status types, shown in this order: triage, backlog, unstarted, started
+    states: [started, unstarted]
+    limit: 15
+
+  - id: slack
+    type: slack
+    title: Slack mentions & DMs
+    server: slack
+    lookbackHours: 48
+    limit: 15
+    # userId: U0123456789   # optional; read from the Slack MCP server when omitted
+
+  - id: nuclino
+    type: nuclino
+    title: Recent Nuclino docs
+    server: nuclino
+    # Workspace names to include; empty = every workspace you can access.
+    workspaces: []
+    limit: 10
+
+  - id: questions
+    type: questions
+    title: Inbox
+
+  - id: agents
+    type: agents
+    title: Agents

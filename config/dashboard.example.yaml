@@ -1,0 +1,64 @@
+# Sidebar sections and their data sources, in display order. Edits apply on the next load.
+# Copy to config/dashboard.yaml and adjust; mothership uses this example until you do.
+#
+# Each tool widget has a source (`via`):
+#   mcp               the `server` from mcp.yaml, called directly: free and fast.
+#   claude-connector  the claude.ai `connector` you already connected, through a
+#                     short Haiku relay: no app or OAuth setup, but each refresh
+#                     uses a little Claude usage (~$0.007 per call), so give it a
+#                     longer refreshSeconds. Needs a `claude` login.
+# A widget whose source is not set up shows a setup hint instead.
+
+timezone: Asia/Seoul
+# How long fetched results are reused before the next automatic refresh.
+refreshSeconds: 120
+
+# Names you go by. Wherever Slack, Linear, or Nuclino content mentions you by
+# name, it is highlighted (Nuclino has no @-mentions in its export, only names).
+me:
+  names: []  # e.g. [Jane Doe, Jane]
+
+widgets:
+  - id: today
+    type: calendar
+    title: Today
+    via: claude-connector
+    connector: Google Calendar
+    refreshSeconds: 600
+    calendars: [primary]
+
+  - id: my-issues
+    type: linear
+    title: My Linear issues
+    server: linear
+    # Linear status types, shown in this order: triage, backlog, unstarted, started
+    states: [started, unstarted]
+    limit: 15
+
+  - id: slack
+    type: slack
+    title: Slack mentions & DMs
+    via: claude-connector
+    connector: Slack
+    refreshSeconds: 600
+    lookbackHours: 48
+    limit: 15
+    # Your Slack member id (Slack profile → ⋮ → Copy member ID). Required with
+    # claude-connector, which cannot read it from the tool description.
+    userId: U0123456789
+
+  - id: nuclino
+    type: nuclino
+    title: Recent Nuclino docs
+    server: nuclino
+    # Workspace names to include; empty = every workspace you can access.
+    workspaces: []
+    limit: 10
+
+  - id: questions
+    type: questions
+    title: Inbox
+
+  - id: agents
+    type: agents
+    title: Agents
