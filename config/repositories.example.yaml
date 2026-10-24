@@ -1,0 +1,7 @@
+# Copy to config/repositories.yaml and list your own folders.
+# Local repositories you work in. Used by the GitHub section (pull requests,
+# issues, and runs of each repo's GitHub remote) and suggested as working
+# folders in the New session dialog. `~` is your home folder.
+repositories:
+  - ~/repositories/my-app
+  - ~/work/another-repo
