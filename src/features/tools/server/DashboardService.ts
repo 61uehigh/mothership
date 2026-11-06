@@ -1,0 +1,358 @@
+import type { SearchGroup, ToolKind, UnavailableReason, WidgetInfo, WidgetNote, WidgetResult } from "@/features/tools/model/Dashboard";
+import type { DashboardConfig } from "@/features/tools/server/DashboardConfig";
+import { isToolWidget, type SourceContext, type ToolSource, type ToolSources, type ToolWidget } from "@/features/tools/server/ToolSource";
+import type { McpConfig, McpServer } from "@/platform/mcp/mcpConfig";
+import { ToolNotFoundError, withSignal, type ToolCaller } from "@/platform/mcp/ToolCaller";
+import { connectionToolName } from "@/features/settings/model/connectionDiagnosis";
+import { errorMessage } from "@/lib/errors";
+import { DeadlineError, toolErrorOutcome, type ToolErrorOutcome } from "@/features/tools/server/toolErrorOutcome";
+import { withCallPurpose, withDefaultCallPurpose, type CallPurpose } from "@/platform/mcp/callPurpose";
+
+// Search answers while you type, so it gives up sooner than a widget or a detail view.
+const MCP_SEARCH_TIMEOUT_MS = 10_000;
+const MCP_LOAD_TIMEOUT_MS = 25_000;
+// A connector relay starts a short Claude session first (and may wait for a relay slot), so it needs longer.
+const CONNECTOR_TIMEOUT_MS = 50_000;
+
+function timeoutFor(widget: ToolWidget, purpose: "search" | "load"): number {
+  if (widget.via === "claude-connector") return CONNECTOR_TIMEOUT_MS;
+  return purpose === "search" ? MCP_SEARCH_TIMEOUT_MS : MCP_LOAD_TIMEOUT_MS;
+}
+
+type Resolved = { ok: true; caller: ToolCaller } | { ok: false; reason: UnavailableReason };
+
+/**
+ * ### ToolOutcome
+ *
+ * The result of {@link DashboardService.callTool}.
+ * - `ok`: `run` finished with `value`.
+ * - `unavailable`: no widget of that kind, or its source is not set up.
+ * - `error`: the tool was reached but `run` threw; `message` is the error as
+ *   thrown, with `code`, `retryAt`, or `sendTimedOut` when mothership
+ *   recognized it (see {@link toolErrorOutcome}).
+ */
+export type ToolOutcome<T> =
+  | { status: "ok"; value: T }
+  | { status: "unavailable"; reason: UnavailableReason }
+  | ({ status: "error"; notFound: boolean } & ToolErrorOutcome);
+
+/**
+ * Runs `run` with a deadline: the signal it gets is aborted when time is up,
+ * so the backend stops the call (a relay call stops spending usage), and the
+ * result rejects then even if a backend ignores the signal.
+ */
+async function withDeadline<T>(ms: number, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      run(controller.signal),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new DeadlineError(ms));
+        }, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * ### WidgetResults
+ *
+ * Cached and running loads by widget id.
+ */
+export type WidgetResults = { cache: Map<string, WidgetResult>; inflight: Map<string, Promise<WidgetResult>> };
+
+/**
+ * ### DashboardDeps
+ *
+ * What the dashboard needs from outside; the composition root provides it.
+ */
+export type DashboardDeps = {
+  /** One source per tool kind. */
+  sources: ToolSources;
+  /** The dashboard config with your Settings choices applied, read fresh each time. */
+  loadConfig: () => Promise<DashboardConfig>;
+  /** The MCP config with your Settings choices applied. */
+  mcpConfig: () => Promise<McpConfig>;
+  /** A caller for an MCP server, over a shared connection. */
+  mcpCaller: (server: McpServer) => ToolCaller;
+  /** A caller for a claude.ai connector, by name. */
+  connectorCaller: (connector: string) => ToolCaller;
+  /** Shared so every route sees the same cache and an invalidation from one reaches the rest. */
+  results: WidgetResults;
+};
+
+/**
+ * ### DashboardService
+ *
+ * Loads tool widgets through MCP or a claude.ai connector, per widget
+ * setting, with a per-widget cache, and runs unified
+ * search across tools. Never throws for tool failures: they become
+ * `unavailable` or `error` results the UI can show in place.
+ */
+export class DashboardService {
+  readonly #deps: DashboardDeps;
+  readonly #cache: Map<string, WidgetResult>;
+  readonly #inflight: Map<string, Promise<WidgetResult>>;
+
+  async #resolve(widget: ToolWidget): Promise<Resolved> {
+    if (widget.disabled) return { ok: false, reason: { code: "turned-off", kind: widget.type, widget: widget.title } };
+    if (widget.via === "claude-connector") return { ok: true, caller: this.#deps.connectorCaller(widget.connector) };
+    let config: McpConfig;
+    try {
+      config = await this.#deps.mcpConfig();
+    } catch (error) {
+      // A half-edited mcp.yaml must not break every widget until the server restarts.
+      return { ok: false, reason: { code: "mcp-config-unreadable", error: errorMessage(error) } };
+    }
+    const { servers, unavailable } = config;
+    const server = servers.find((s) => s.name === widget.server);
+    if (server !== undefined) return { ok: true, caller: this.#deps.mcpCaller(server) };
+    // A missing key is fixed in Settings, so say that rather than which variable is unset.
+    if (unavailable.some((u) => u.name === widget.server)) return { ok: false, reason: { code: "not-connected" } };
+    return { ok: false, reason: { code: "no-server", server: widget.server } };
+  }
+
+  constructor(deps: DashboardDeps) {
+    this.#deps = deps;
+    this.#cache = deps.results.cache;
+    this.#inflight = deps.results.inflight;
+  }
+
+  /** The source for `widget`, typed by its kind. */
+  #source(widget: ToolWidget): ToolSource<ToolWidget> {
+    // `sources` is keyed by kind, so the source for `widget.type` accepts exactly this widget.
+    return this.#deps.sources[widget.type] as ToolSource<ToolWidget>;
+  }
+
+  /**
+   * ### config
+   *
+   * @returns The dashboard config in effect, for tool modules that need their widget's settings.
+   */
+  config(): Promise<DashboardConfig> {
+    return this.#deps.loadConfig();
+  }
+
+  /**
+   * ### widgets
+   *
+   * @returns Widget list in display order, plus the auto-refresh interval.
+   */
+  async widgets(): Promise<{ widgets: Array<WidgetInfo>; refreshSeconds: number }> {
+    const config = await this.#deps.loadConfig();
+    return {
+      widgets: config.widgets.map((w) => ({ id: w.id, kind: w.type, title: w.title })),
+      refreshSeconds: config.refreshSeconds,
+    };
+  }
+
+  /**
+   * ### invalidate
+   *
+   * Drops cached results of every widget of `kind`, after a change made from
+   * mothership (a reply, an RSVP, a new source chosen in Settings) so the
+   * next load shows it instead of waiting out `refreshSeconds`. A load still
+   * running is let go too: its answer may come from before the change.
+   */
+  async invalidate(kind: ToolKind): Promise<void> {
+    const config = await this.#deps.loadConfig();
+    for (const widget of config.widgets) {
+      if (widget.type !== kind) continue;
+      this.#cache.delete(widget.id);
+      this.#inflight.delete(widget.id);
+    }
+  }
+
+  /**
+   * ### load
+   *
+   * @param id - Widget id from `config/dashboard.yaml`.
+   * @param refresh - Ignore a cached result younger than `refreshSeconds`.
+   * @returns The widget's result, or `undefined` for an unknown or non-tool widget.
+   */
+  async load(id: string, refresh: boolean): Promise<WidgetResult | undefined> {
+    const config = await this.#deps.loadConfig();
+    const widget = config.widgets.find((w) => w.id === id);
+    if (widget === undefined || !isToolWidget(widget)) return undefined;
+
+    const cached = this.#cache.get(id);
+    const ttlSeconds = Math.max(widget.refreshSeconds ?? config.refreshSeconds, this.#source(widget).minRefreshSeconds ?? 0);
+    if (!refresh && cached !== undefined && Date.now() - cached.fetchedAt < ttlSeconds * 1000) return cached;
+    const running = this.#inflight.get(id);
+    if (running !== undefined) return running;
+
+    const promise = this.#fetch(widget, config);
+    this.#inflight.set(id, promise);
+    let result: WidgetResult;
+    // The shared map, not this instance, decides: `invalidate` may run on another request's instance.
+    let current = false;
+    try {
+      result = await promise;
+    } finally {
+      // Never left behind, even if the load threw; the next load starts fresh.
+      current = this.#inflight.get(id) === promise;
+      if (current) this.#inflight.delete(id);
+    }
+    // An invalidated load answers its caller but is not kept: its answer may predate the change.
+    if (current) this.#cache.set(id, result);
+    return result;
+  }
+
+  async #fetch(widget: ToolWidget, config: DashboardConfig): Promise<WidgetResult> {
+    const fetchedAt = Date.now();
+    const resolved = await this.#resolve(widget);
+    if (!resolved.ok) return { status: "unavailable", reason: resolved.reason, fetchedAt };
+    try {
+      const context: SourceContext = { now: fetchedAt, timeZone: config.timezone };
+      const source = this.#source(widget);
+      // Counted as the sidebar's; it refreshes in the background, so it waits behind calls you are waiting on.
+      const items = await withDefaultCallPurpose({ source: "sidebar", background: true }, () =>
+        withDeadline(timeoutFor(widget, "load"), (signal) => source.load(withSignal(resolved.caller, signal), widget, context)),
+      );
+      const notes: Array<WidgetNote> = [
+        ...(source.note === undefined ? [] : [source.note]),
+        ...(widget.via === "claude-connector" ? (["connector-usage"] as const) : []),
+      ];
+      return { status: "ok", items, notes, fetchedAt };
+    } catch (error) {
+      return { status: "error", ...toolErrorOutcome(error, { write: false }), fetchedAt };
+    }
+  }
+
+  /**
+   * ### loadKind
+   *
+   * Loads the first widget of a tool, e.g. `slack`, through the same cache as the sidebar.
+   *
+   * @returns The widget's result, or `undefined` when there is no widget for that tool.
+   */
+  async loadKind(kind: ToolKind, refresh: boolean): Promise<WidgetResult | undefined> {
+    const config = await this.#deps.loadConfig();
+    const widget = config.widgets.filter(isToolWidget).find((w) => w.type === kind);
+    return widget === undefined ? undefined : this.load(widget.id, refresh);
+  }
+
+  /**
+   * ### loadBySource
+   *
+   * Loads, fresh, the first widget that reads from the MCP server `server`
+   * (e.g. for a connection test in Settings).
+   *
+   * @returns The widget's result, or `undefined` when no widget reads from it.
+   */
+  async loadBySource(server: string): Promise<WidgetResult | undefined> {
+    const config = await this.#deps.loadConfig();
+    const widget = config.widgets.filter(isToolWidget).find((w) => w.server === server);
+    return widget === undefined ? undefined : this.load(widget.id, true);
+  }
+
+  /**
+   * ### cachedBySource
+   *
+   * The sidebar's latest result for the first widget that reads from the MCP
+   * server `server`, without loading anything.
+   *
+   * @returns The cached result, or `undefined` when there is none yet.
+   */
+  async cachedBySource(server: string): Promise<WidgetResult | undefined> {
+    const config = await this.#deps.loadConfig();
+    const widget = config.widgets.filter(isToolWidget).find((w) => w.server === server);
+    return widget === undefined ? undefined : this.#cache.get(widget.id);
+  }
+
+  /**
+   * ### search
+   *
+   * Searches every tool that has a widget, in parallel. Each tool answers
+   * within its timeout or reports an error; slow tools never hold back the
+   * others' results.
+   *
+   * @returns One group per tool, in widget order.
+   */
+  async search(query: string): Promise<Array<SearchGroup>> {
+    const config = await this.#deps.loadConfig();
+    const now = Date.now();
+    const firstOfKind = new Map<ToolKind, ToolWidget>();
+    for (const widget of config.widgets) {
+      if (isToolWidget(widget) && !firstOfKind.has(widget.type)) firstOfKind.set(widget.type, widget);
+    }
+
+    return Promise.all(
+      [...firstOfKind.values()].map(async (widget): Promise<SearchGroup> => {
+        const fetchedAt = Date.now();
+        const resolved = await this.#resolve(widget);
+        if (!resolved.ok) {
+          return { kind: widget.type, title: widget.title, result: { status: "unavailable", reason: resolved.reason, fetchedAt } };
+        }
+        try {
+          const context: SourceContext = { now, timeZone: config.timezone };
+          const items = await withCallPurpose({ source: "search", background: false }, () =>
+            withDeadline(timeoutFor(widget, "search"), (signal) => this.#source(widget).search(withSignal(resolved.caller, signal), widget, query, context)),
+          );
+          return { kind: widget.type, title: widget.title, result: { status: "ok", items, notes: [], fetchedAt } };
+        } catch (error) {
+          return { kind: widget.type, title: widget.title, result: { status: "error", ...toolErrorOutcome(error, { write: false }), fetchedAt } };
+        }
+      }),
+    );
+  }
+
+  /**
+   * ### myNames
+   *
+   * @returns The `me.names` from `config/dashboard.yaml`, for highlighting you in tool content.
+   */
+  async myNames(): Promise<Array<string>> {
+    return (await this.#deps.loadConfig()).me.names;
+  }
+
+  /**
+   * ### callTool
+   *
+   * Runs `run` with the caller of the first widget of `kind` in
+   * `config/dashboard.yaml`, so detail views (a Nuclino doc, a Linear issue)
+   * use the same source as the widget that listed them. Not cached.
+   *
+   * @param kind - Tool whose widget source to use.
+   * @param run - Makes the tool calls and parses their output.
+   * @param options - `write` for calls that change something (send, reply,
+   *   react, RSVP): they get no outer deadline, because abandoning one midway
+   *   could report a failure for something that then happens, and a retry
+   *   would do it twice. The backend's own timeout still applies.
+   *   `purpose`: what the calls are counted as; by default a detail view
+   *   someone is waiting on.
+   * @returns `run`'s value, or why it could not run or failed.
+   */
+  async callTool<T>(
+    kind: ToolKind,
+    run: (caller: ToolCaller) => Promise<T>,
+    options: { write?: boolean; purpose?: CallPurpose } = {},
+  ): Promise<ToolOutcome<T>> {
+    return withCallPurpose(options.purpose ?? { source: `${kind} detail`, background: false }, () => this.#callTool(kind, run, options.write === true));
+  }
+
+  async #callTool<T>(kind: ToolKind, run: (caller: ToolCaller) => Promise<T>, write: boolean): Promise<ToolOutcome<T>> {
+    const config = await this.#deps.loadConfig();
+    const widget = config.widgets.filter(isToolWidget).find((w) => w.type === kind);
+    if (widget === undefined) {
+      return { status: "unavailable", reason: { code: "no-widget", kind } };
+    }
+    const resolved = await this.#resolve(widget);
+    if (!resolved.ok) return { status: "unavailable", reason: resolved.reason };
+    try {
+      const value =
+        write
+          ? await run(resolved.caller)
+          : await withDeadline(timeoutFor(widget, "load"), (signal) => run(withSignal(resolved.caller, signal)));
+      return { status: "ok", value };
+    } catch (error) {
+      const call = write ? { write: true as const, service: widget.via === "claude-connector" ? widget.connector : connectionToolName(widget.server) } : { write: false as const };
+      return { status: "error", notFound: error instanceof ToolNotFoundError, ...toolErrorOutcome(error, call) };
+    }
+  }
+}
