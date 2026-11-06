@@ -1,0 +1,11 @@
+{
+  "name": "mothership",
+  "productName": "Mothership",
+  "version": "0.1.0",
+  "description": "All your work tools on one screen, and agents to hand the work to.",
+  "author": "Changjun Yeo",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs"
+}
