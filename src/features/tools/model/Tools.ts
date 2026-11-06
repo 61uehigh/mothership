@@ -156,6 +156,11 @@ export type SlackThreadMessage = {
   at: number | undefined;
   /** Body converted from Slack mrkdwn to Markdown. */
   markdown: string;
+  /**
+   * The small muted line Slack draws under an app's message (context blocks,
+   * attachment footers), one plain-text entry per element.
+   */
+  context: Array<string>;
   reactions: Array<{ name: string; count: number }>;
   /** Attached file names, e.g. `IMG_4651.jpg (image/jpeg, 1.9 MB)`. */
   files: Array<string>;
@@ -179,6 +184,11 @@ export type SlackThread = {
   conversation: boolean;
   /** Opens the message in Slack. */
   url: string;
+  /**
+   * In a DM, the other person's or app's name (`Linear`), from the messages
+   * they sent; `undefined` in a channel or when only you wrote.
+   */
+  partner: string | undefined;
 };
 
 /**

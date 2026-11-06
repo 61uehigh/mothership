@@ -19,6 +19,7 @@
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@openai/codex": "0.172.0",
     "@openai/codex-sdk": "^0.172.0",
+    "gemoji": "8.1.0",
     "js-yaml": "^5.5.0",
     "lucide-react": "^1.61.0",
     "modern-screenshot": "4.7.0",

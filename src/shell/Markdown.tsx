@@ -83,7 +83,12 @@ const COMPONENTS: Components = {
   h6: ({ children }) => <h6 className="mt-4 mb-1.5 text-sm font-semibold text-zinc-500 first:mt-0">{children}</h6>,
   p: ({ children }) => <p className="my-2.5 leading-relaxed first:mt-0 last:mb-0">{children}</p>,
   ul: ({ children, className }) => (
-    <ul className={`my-2 pl-6 ${className?.includes("contains-task-list") ? "list-none pl-1" : "list-disc"} [&_ol]:my-1 [&_ul]:my-1`}>{children}</ul>
+    // Nested levels change bullet as Slack and browsers do: •, then ◦, then ▪.
+    <ul
+      className={`my-2 pl-6 ${className?.includes("contains-task-list") ? "list-none pl-1" : "list-disc [&_ul]:list-[circle] [&_ul_ul]:list-[square]"} [&_ol]:my-1 [&_ul]:my-1`}
+    >
+      {children}
+    </ul>
   ),
   ol: ({ children }) => <ol className="my-2 list-decimal pl-6 [&_ol]:my-1 [&_ul]:my-1">{children}</ol>,
   li: ({ children }) => <li className="my-0.5 leading-relaxed [&>input]:mr-1.5 [&>input]:align-middle">{children}</li>,
@@ -153,12 +158,13 @@ export const Markdown = memo(function Markdown({ children, fileRoot }: { childre
     ...COMPONENTS,
     a: ({ href, children: label }) => {
       if (href === "mention:me" || href === "mention:other") {
+        // No side padding: a mention inside a word ("창준님") must not split it apart.
         return (
           <span
             className={
               href === "mention:me"
-                ? "rounded bg-amber-300 px-1 font-semibold text-amber-950 ring-1 ring-amber-500 dark:bg-amber-400"
-                : "rounded bg-sky-100 px-1 font-medium text-sky-800 dark:bg-sky-900/60 dark:text-sky-200"
+                ? "rounded bg-amber-300 font-semibold text-amber-950 dark:bg-amber-400"
+                : "rounded bg-sky-100 font-medium text-sky-800 dark:bg-sky-900/60 dark:text-sky-200"
             }
           >
             {label}

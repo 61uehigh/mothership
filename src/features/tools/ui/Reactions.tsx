@@ -3,7 +3,7 @@
 import { SmilePlus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "@/lib/errors";
-import { emojiChar, QUICK_REACTIONS } from "@/features/tools/ui/emoji";
+import { emojiChar, QUICK_REACTIONS } from "@/features/tools/model/emoji";
 import type { Reaction } from "@/features/tools/model/Tools";
 import { useT } from "@/ui/i18n/useT";
 
