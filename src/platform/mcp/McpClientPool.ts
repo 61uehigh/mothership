@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServer } from "@/platform/mcp/McpRegistry";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallOptions, ToolCaller } from "@/platform/mcp/ToolCaller";
@@ -116,13 +116,15 @@ export class McpClientPool {
   async callText(server: McpServer, tool: string, args: Record<string, unknown>, options?: CallOptions): Promise<string> {
     let result;
     const pending = this.#client(server);
+    let connected = false;
     try {
       const client = await pending;
+      connected = true;
       result = await client.callTool({ name: tool, arguments: args }, undefined, { timeout: CALL_TIMEOUT_MS, signal: options?.signal });
     } catch (error) {
       // A call the caller gave up on says nothing about the connection.
       if (options?.signal?.aborted === true) throw new McpCallError(`${server.name} call was cancelled`, { cause: error });
-      throw this.#failure(server, pending, error);
+      throw this.#failure(server, pending, error, connected);
     }
     const content = Array.isArray(result.content) ? result.content : [];
     const text = content
@@ -142,22 +144,30 @@ export class McpClientPool {
    */
   async toolDescription(server: McpServer, tool: string): Promise<string | undefined> {
     const pending = this.#client(server);
+    let connected = false;
     try {
       const client = await pending;
+      connected = true;
       const { tools } = await client.listTools(undefined, { timeout: CALL_TIMEOUT_MS });
       return tools.find((t) => t.name === tool)?.description;
     } catch (error) {
-      throw this.#failure(server, pending, error);
+      throw this.#failure(server, pending, error, connected);
     }
   }
 
   /**
    * Turns a failed call into a user-facing error. Timeouts and protocol
    * errors leave the connection alone (other calls may be using it); only a
-   * broken connection is closed so the next call reconnects.
+   * broken connection is closed so the next call reconnects. A rate limit on
+   * an open connection keeps it too: reconnecting would only add requests.
+   *
+   * @param connected - The connection was made, and the call on it failed.
    */
-  #failure(server: McpServer, client: Promise<Client>, error: unknown): McpCallError {
+  #failure(server: McpServer, client: Promise<Client>, error: unknown, connected: boolean): McpCallError {
     const detail = error instanceof Error ? error.message : String(error);
+    if (connected && error instanceof StreamableHTTPError && error.code === 429) {
+      return new McpCallError(`${server.name} is rate limiting requests: ${detail}`, { cause: error });
+    }
     if (error instanceof McpError && error.code !== ErrorCode.ConnectionClosed) {
       return new McpCallError(
         error.code === ErrorCode.RequestTimeout ? `${server.name} did not answer in time` : `${server.name} rejected the call: ${detail}`,

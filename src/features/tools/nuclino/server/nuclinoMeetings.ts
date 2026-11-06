@@ -6,10 +6,20 @@ import type { ToolCaller } from "@/platform/mcp/ToolCaller";
 
 /** Item reads are reused this long, so browsing collections does not refetch every note. */
 const ITEM_CACHE_MS = 5 * 60_000;
+/**
+ * Notes in a listing are reused this long, even on refresh: a note's title
+ * and date rarely change, and reading 40 notes again soon hits Nuclino's rate
+ * limit. Opening a note always reads it fresh.
+ */
+const LISTED_NOTE_CACHE_MS = 60 * 60_000;
+/** After Nuclino says "too many requests", calls wait this long, answering from the cache meanwhile. */
+const RATE_LIMIT_PAUSE_MS = 60_000;
 /** Notes read per collection at most. Nuclino keeps children in sidebar order, so both ends are read. */
 const NOTES_PER_COLLECTION = 40;
 /** Item reads in flight at once. */
-const CONCURRENCY = 8;
+const CONCURRENCY = 4;
+
+const RATE_LIMITED = /rate limit|too many requests|\b429\b/i;
 
 // Shape of `get_item` output (checked against real calls): collections carry `childIds`.
 const itemSchema = z.object({
@@ -27,18 +37,47 @@ const workspaceSchema = z.array(z.object({ id: z.string(), name: z.string(), chi
 type Item = z.infer<typeof itemSchema>;
 
 const itemCache = new Map<string, { at: number; item: Item }>();
+/** Epoch milliseconds until which Nuclino is not called, after it reported a rate limit. */
+let pausedUntil = 0;
+
+/**
+ * ### NuclinoRateLimitError
+ *
+ * Nuclino refused calls for making too many; they resume after a minute.
+ */
+export class NuclinoRateLimitError extends Error {
+  constructor(options?: ErrorOptions) {
+    super("Nuclino is limiting requests right now. Try again in a minute.", options);
+    this.name = "NuclinoRateLimitError";
+  }
+}
 
 /**
  * ### readNuclinoItem
  *
- * One item, from a five-minute cache unless `fresh`.
+ * One item, from the cache when it is younger than `maxAgeMs`. While Nuclino
+ * is rate limiting, an older cached copy is used instead of calling it.
  *
+ * @param maxAgeMs - `0` reads fresh.
+ * @throws NuclinoRateLimitError When Nuclino is rate limiting and the item is not cached.
  * @throws Error When the call fails or the output is not the expected JSON.
  */
-export async function readNuclinoItem(caller: ToolCaller, itemId: string, fresh = false): Promise<Item> {
+export async function readNuclinoItem(caller: ToolCaller, itemId: string, maxAgeMs = ITEM_CACHE_MS): Promise<Item> {
   const cached = itemCache.get(itemId);
-  if (!fresh && cached !== undefined && Date.now() - cached.at < ITEM_CACHE_MS) return cached.item;
-  const text = await caller.callText("get_item", { itemId });
+  if (cached !== undefined && Date.now() - cached.at < maxAgeMs) return cached.item;
+  if (Date.now() < pausedUntil) {
+    if (cached !== undefined) return cached.item;
+    throw new NuclinoRateLimitError();
+  }
+  let text: string;
+  try {
+    text = await caller.callText("get_item", { itemId });
+  } catch (error) {
+    if (!(error instanceof Error && RATE_LIMITED.test(error.message))) throw error;
+    pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+    if (cached !== undefined) return cached.item;
+    throw new NuclinoRateLimitError({ cause: error });
+  }
   const parsed = itemSchema.safeParse(parseJson(text));
   if (!parsed.success) throw new Error(`Could not parse the Nuclino response: ${truncate(text, 200)}`);
   itemCache.set(itemId, { at: Date.now(), item: parsed.data });
@@ -101,13 +140,23 @@ export async function listMeetingNotes(
   fresh: boolean,
 ): Promise<Array<MeetingNote>> {
   const notes: Array<Item> = [];
-  let level = [await readNuclinoItem(caller, collection.id, fresh)];
+  const collectionAge = fresh ? 0 : ITEM_CACHE_MS;
+  let level = [await readNuclinoItem(caller, collection.id, collectionAge)];
   while (level.length > 0 && notes.length < NOTES_PER_COLLECTION) {
     const ids = level.flatMap((c) => c.childIds ?? []);
     const room = NOTES_PER_COLLECTION - notes.length;
     // Sidebar order may put new notes first or last; keep both ends.
     const picked = ids.length <= room ? ids : [...ids.slice(0, Math.ceil(room / 2)), ...ids.slice(ids.length - Math.floor(room / 2))];
-    const children = (await mapLimited(picked, (id) => readNuclinoItem(caller, id, fresh).catch(() => undefined))).filter((c) => c !== undefined);
+    // Collections are read as fresh as the listing, so new notes show; notes come from the longer cache.
+    const children = (
+      await mapLimited(picked, async (id) => {
+        const known = itemCache.get(id)?.item;
+        return readNuclinoItem(caller, id, known?.type === "item" ? LISTED_NOTE_CACHE_MS : collectionAge).catch((error: unknown) => {
+          if (error instanceof NuclinoRateLimitError) throw error;
+          return undefined;
+        });
+      })
+    ).filter((c) => c !== undefined);
     notes.push(...children.filter((c) => c.type === "item"));
     level = children.filter((c) => c.type === "collection");
   }
@@ -129,10 +178,11 @@ export async function listMeetingNotes(
 /**
  * ### readMeetingNote
  *
- * A note's body as Markdown, read fresh so the summary matches its latest version.
+ * A note's body as Markdown, read fresh so the summary matches its latest
+ * version, or the cached copy while Nuclino is rate limiting.
  */
 export async function readMeetingNote(caller: ToolCaller, itemId: string): Promise<{ title: string; markdown: string; updatedAt: number | undefined }> {
-  const item = await readNuclinoItem(caller, itemId, true);
+  const item = await readNuclinoItem(caller, itemId, 0);
   if (item.type !== "item") throw new Error(`"${item.title}" is a collection, not a note`);
   return { title: item.title || "(untitled)", markdown: toGfm(item.content ?? ""), updatedAt: isoToEpoch(item.lastUpdatedAt ?? undefined) };
 }

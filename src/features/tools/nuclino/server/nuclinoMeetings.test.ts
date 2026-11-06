@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { listMeetingNotes, listNuclinoCollections, readMeetingNote } from "@/features/tools/nuclino/server/nuclinoMeetings";
+import { listMeetingNotes, listNuclinoCollections, NuclinoRateLimitError, readMeetingNote } from "@/features/tools/nuclino/server/nuclinoMeetings";
 import type { ToolCaller } from "@/platform/mcp/ToolCaller";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -51,6 +51,14 @@ describe("listMeetingNotes", () => {
     ]);
     expect(notes[0].collectionId).toBe(id(1));
   });
+
+  it("reads the collections again on refresh but reuses the notes it already read", async () => {
+    const first = fakeNuclino();
+    await listMeetingNotes(first, { id: id(1), title: "Weekly", workspace: "Operation" }, () => false, true);
+    const again = fakeNuclino();
+    await listMeetingNotes(again, { id: id(1), title: "Weekly", workspace: "Operation" }, () => false, true);
+    expect(again.calls).toEqual([`get_item:${id(1)}`, `get_item:${id(2)}`, `get_item:${id(3)}`]);
+  });
 });
 
 describe("readMeetingNote", () => {
@@ -62,5 +70,20 @@ describe("readMeetingNote", () => {
 
   it("refuses a collection", async () => {
     await expect(readMeetingNote(fakeNuclino(), id(1))).rejects.toThrow(/collection/);
+  });
+});
+
+// Last: the pause it starts holds for every test after it.
+describe("rate limits", () => {
+  it("pauses calls after a rate limit, answering from the cache meanwhile", async () => {
+    await readMeetingNote(fakeNuclino(), id(11));
+    const limited = fakeNuclino();
+    limited.callText = async (tool, args) => {
+      limited.calls.push(`${tool}:${String(args.itemId ?? "")}`);
+      throw new Error('Streamable HTTP error: Error POSTing to endpoint: {"status":"fail","message":"You\'ve made too many requests and hit a rate limit"}');
+    };
+    expect((await readMeetingNote(limited, id(11))).title).toBe("2026-01-12");
+    await expect(readMeetingNote(limited, id(30))).rejects.toBeInstanceOf(NuclinoRateLimitError);
+    expect(limited.calls).toEqual([`get_item:${id(11)}`]);
   });
 });

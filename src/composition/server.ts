@@ -324,7 +324,7 @@ async function withNuclino<T>(run: (caller: ToolCaller) => Promise<T>): Promise<
  * The newest notes in each collection you chose in Settings → Meetings.
  * A collection that fails to load says why; the others still show.
  *
- * @param refresh - Read Nuclino fresh instead of from the five-minute cache.
+ * @param refresh - Read the collections fresh, so new notes show; notes already read come from the cache.
  */
 export async function loadMeetings(refresh: boolean): Promise<MeetingsView> {
   const { meetings } = await readSettings();
