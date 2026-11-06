@@ -6,7 +6,7 @@ import { AgentStore } from "@/features/sessions/server/AgentStore";
 import { checkProviders } from "@/features/sessions/server/providerChecks";
 import { isConnectionId, kakaoAccountState, youTubeAccountState } from "@/features/settings/model/Settings";
 import { SettingsService, type SidebarState } from "@/features/settings/server/SettingsService";
-import { readSettings } from "@/features/settings/server/settingsStore";
+import { readSettings, savedLead } from "@/features/settings/server/settingsStore";
 import { GoogleSignIn } from "@/features/settings/server/GoogleSignIn";
 import { TOOL_KINDS, type ToolKind } from "@/features/tools/model/Dashboard";
 import { loadDashboardConfig, type DashboardConfig } from "@/features/tools/server/DashboardConfig";
@@ -22,6 +22,9 @@ import { SystemMonitor } from "@/features/usage/server/SystemMonitor";
 import { connectorCaller } from "@/platform/mcp/ClaudeConnectorRelay";
 import { McpClientPool } from "@/platform/mcp/McpClientPool";
 import { RateLimitGate } from "@/platform/mcp/RateLimitGate";
+import { withCallPurpose } from "@/platform/mcp/callPurpose";
+import { ToolCallLedger } from "@/platform/mcp/ToolCallLedger";
+import { processState } from "@/platform/processState";
 import { loadMcpConfig, type McpConfig } from "@/platform/mcp/mcpConfig";
 import type { ToolCaller } from "@/platform/mcp/ToolCaller";
 import { appPath, dataPath, workspaceDir } from "@/platform/paths";
@@ -58,6 +61,7 @@ type State = {
 type LazyServices = {
   todos: TodoStore;
   rateLimits: RateLimitGate;
+  toolCalls: ToolCallLedger;
   googleSignIn: GoogleSignIn;
   youtubeMusic: YouTubeMusicAuth;
   inbox: InboxService;
@@ -169,13 +173,15 @@ export function getRuntime(): AgentRuntime {
 export function getFeedback(): FeedbackService {
   return new FeedbackService({
     developer: async () => (await readSettings()).developer,
-    startSession: ({ name, initialMessage, repo }) =>
-      getRuntime().createAgent({
+    startSession: async ({ name, initialMessage, repo }) => {
+      // Your default lead (Settings → Agents) takes feedback on too.
+      const lead = savedLead(await readSettings());
+      return getRuntime().createAgent({
         name,
         role: "lead",
-        provider: "claude",
-        model: undefined,
-        effort: "high",
+        provider: lead.provider,
+        model: lead.model,
+        effort: lead.effort,
         parentId: undefined,
         // Its own code is all it needs; no work tools.
         mcp: [],
@@ -183,9 +189,14 @@ export function getFeedback(): FeedbackService {
         repo,
         worktree: true,
         compareGroup: undefined,
-      }),
+      });
+    },
+    toolCalls: () => getToolCalls().counts(Date.now() - TOOL_CALLS_WINDOW_MS),
   });
 }
+
+/** How far back the debug panel counts work-tool calls. */
+const TOOL_CALLS_WINDOW_MS = 10 * 60_000;
 
 /** Today in the dashboard's time zone (Settings → You, else `dashboard.yaml`), `YYYY-MM-DD`: the zone Calendar and Linear use, not the Mac's. */
 const zonedToday = async () => zonedDate(Date.now(), (await dashboardConfig()).timezone);
@@ -220,8 +231,8 @@ export function getInbox(): InboxService {
 }
 
 /** Runs `run` with the Nuclino caller; a tool failure becomes an `HttpError` to throw. */
-async function withNuclino<T>(run: (caller: ToolCaller) => Promise<T>): Promise<T> {
-  return toolValue(await getDashboard().callTool("nuclino", run));
+async function withNuclino<T>(source: string, background: boolean, run: (caller: ToolCaller) => Promise<T>): Promise<T> {
+  return toolValue(await getDashboard().callTool("nuclino", run, { purpose: { source, background } }));
 }
 
 /** Nuclino items read for the meeting list, so a restart does not read every note again. */
@@ -239,9 +250,9 @@ export function getMeetings(): MeetingsService {
     () =>
       new MeetingsService({
         source: {
-          listNotes: (collection, fresh) => withNuclino((caller) => listMeetingNotes(caller, collection, fresh)),
-          readNote: (id) => withNuclino((caller) => readMeetingNote(caller, id)),
-          listCollections: (parentId, path) => withNuclino((caller) => listNuclinoCollections(caller, parentId, path)),
+          listNotes: (collection, fresh) => withNuclino("meetings list", !fresh, (caller) => listMeetingNotes(caller, collection, fresh)),
+          readNote: (id) => withNuclino("meeting note", false, (caller) => readMeetingNote(caller, id)),
+          listCollections: (parentId, path) => withNuclino("meetings settings", false, (caller) => listNuclinoCollections(caller, parentId, path)),
           noteUrl: nuclinoUrl,
           restoreCache: () => restoreNuclinoItems(nuclinoItemsFile()),
           saveCache: () => saveNuclinoItems(nuclinoItemsFile()),
@@ -315,9 +326,36 @@ export function getDetailCache(): DetailCache {
   return state().details;
 }
 
-/** One for every route, so a tool's rate limit holds back all of its callers. */
+/**
+ * Nuclino allows 150 API calls a minute per account (as its API clients
+ * document it). Agents using the nuclino MCP server spend the same account
+ * without passing through here, so mothership keeps to well under half.
+ */
+const CALL_BUDGETS = { nuclino: { perMinute: 60, burst: 10 } };
+
+/**
+ * ### getToolCalls
+ *
+ * @returns The count of calls the server made to each work tool in the last
+ *   hour; a line a minute goes to the server log.
+ */
+export function getToolCalls(): ToolCallLedger {
+  return shared("toolCalls", ToolCallLedger, () => {
+    const ledger = new ToolCallLedger();
+    const minute = processState("toolCalls.logger", () => ({ timer: undefined as ReturnType<typeof setInterval> | undefined }));
+    // A dev reload makes a new ledger; the old timer would log the old one.
+    if (minute.timer !== undefined) clearInterval(minute.timer);
+    minute.timer = setInterval(() => {
+      for (const line of ledger.minuteLines()) console.log(line);
+    }, 60_000);
+    minute.timer.unref();
+    return ledger;
+  });
+}
+
+/** One for every route, so a tool's rate limit and call budget hold back all of its callers. */
 function rateLimits(): RateLimitGate {
-  return shared("rateLimits", RateLimitGate, () => new RateLimitGate());
+  return shared("rateLimits", RateLimitGate, () => new RateLimitGate({ budgets: CALL_BUDGETS, ledger: getToolCalls() }));
 }
 
 function connector(name: string): ToolCaller {
@@ -372,6 +410,19 @@ export async function afterSettingsChange(): Promise<void> {
 }
 
 /**
+ * ### afterGoogleSignOut
+ *
+ * After the Google Calendar sign-in is removed: closes the Calendar MCP
+ * server, which holds the old token in memory, then refreshes like any
+ * Settings change, so the sidebar and the Inbox see it signed out.
+ */
+export async function afterGoogleSignOut(): Promise<void> {
+  const { servers } = await mcpConfig().catch(() => ({ servers: [] }));
+  await state().pool.retain(new Set(servers.map((s) => s.name).filter((name) => name !== "google_calendar")));
+  await afterSettingsChange();
+}
+
+/**
  * ### getFiles
  *
  * @returns The Explorer's file service; a session root is that session's folder.
@@ -421,7 +472,7 @@ export function getSettings(): SettingsService {
     agents: checkProviders,
     tools: { github: checkGitHubCli, docker: checkDocker },
     sidebar: sidebarState,
-    loadWidget: (id) => getDashboard().loadBySource(id),
+    loadWidget: (id) => withCallPurpose({ source: "connection test", background: false }, () => getDashboard().loadBySource(id)),
     cachedWidget: (id) => getDashboard().cachedBySource(id),
     accounts: async () => {
       const [kakao, youtube] = await Promise.all([kakaoStatus(), getYouTubeMusicAuth().status()]);

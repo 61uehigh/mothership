@@ -107,7 +107,7 @@ export type SectionPlace = "left" | "right" | "hidden";
  * ### SECTION_DRAG_TYPE
  *
  * Drag-and-drop data type that carries a section id, shared by the sidebars
- * and Settings → Sidebars so a section can be dragged from one to the other.
+ * and Settings → Workspace → Sidebars so a section can be dragged from one to the other.
  */
 export const SECTION_DRAG_TYPE = "application/x-mothership-section";
 

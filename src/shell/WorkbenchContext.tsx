@@ -90,7 +90,7 @@ export type Workbench = Omit<Layout, "leftWidth" | "rightWidth"> & {
    *
    * Moves a section to just before the one now at `before` in `place` (the
    * end when left out), as dropping it there does, and opens that sidebar
-   * if it was closed. The same layout Settings → Sidebars edits.
+   * if it was closed. The same layout Settings → Workspace → Sidebars edits.
    */
   placeSection: (section: SectionId, place: SectionPlace, before?: number) => void;
   /** Folds or unfolds a stacked section. */

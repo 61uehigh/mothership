@@ -67,7 +67,6 @@ function ShellBody({ children }: { children: ReactNode }) {
         setCreating(true);
       },
       openPalette: (mode, query = "") => setPalette({ mode, query }),
-      openHelp: () => setHelp(true),
       notifications,
       developerMode,
       openFeedback: () => setFeedback(true),

@@ -18,7 +18,7 @@ export type StackedSection = {
   collapsed: boolean;
   toggle: () => void;
   openFull: () => void;
-  /** Takes the section out of the sidebars (Settings → Sidebars brings it back). */
+  /** Takes the section out of the sidebars (Settings → Workspace → Sidebars brings it back). */
   hide: () => void;
   icon: ComponentType<BrandIconProps>;
 };
@@ -97,7 +97,7 @@ export function PaneHeader({ title, children }: { title: string; children?: Reac
       <button
         type="button"
         aria-label={`Hide ${title} from the sidebar`}
-        title="Hide from the sidebar (bring it back in Settings → Sidebars)"
+        title="Hide from the sidebar (bring it back in Settings → Workspace → Sidebars)"
         className="rounded p-1 opacity-0 hover:bg-zinc-200 focus-visible:opacity-100 group-hover/section:opacity-100 dark:hover:bg-zinc-800"
         onClick={stacked.hide}
       >

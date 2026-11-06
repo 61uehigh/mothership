@@ -11,7 +11,7 @@ type Side = "left" | "right";
 type DropTarget = { side: Side; index: number };
 
 type SectionDrag = {
-  /** The section being dragged, from a sidebar header or Settings → Sidebars; `undefined` when none is. */
+  /** The section being dragged, from a sidebar header or Settings → Workspace → Sidebars; `undefined` when none is. */
   dragged: SectionId | undefined;
   target: DropTarget | undefined;
   /** Accepts a dragged section over this spot and remembers it as the target. */

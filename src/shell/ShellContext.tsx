@@ -38,11 +38,9 @@ export type Shell = Omit<LiveAgents, "messages"> & {
    * Opens the command center: `everything` (quick open), `commands`, or `search` (all tools).
    */
   openPalette: (mode: PaletteMode, query?: string) => void;
-  /** Opens the keyboard shortcuts dialog. */
-  openHelp: () => void;
   /** Browser notification state and its toggle. */
   notifications: { state: NotificationState; toggle: () => void };
-  /** Developer mode is on (Settings → Developer): feedback and the debug panel are available. */
+  /** Developer mode is on (Settings → Advanced): feedback and the debug panel are available. */
   developerMode: boolean;
   /** Starts feedback on the screen (developer mode). */
   openFeedback: () => void;
