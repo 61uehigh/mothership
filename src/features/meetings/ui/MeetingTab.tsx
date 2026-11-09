@@ -1,13 +1,14 @@
 "use client";
 
-import { CheckCircle2, ChevronRight, CircleHelp, Clock, Gavel, ListTodo, Sparkles } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, CircleHelp, Clock, Gavel, ListPlus, ListTodo, Sparkles } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { ClaudeLoginNote, isClaudeLoginFailure } from "@/shell/ClaudeLoginNote";
 import { Markdown } from "@/shell/Markdown";
 import { Chip, FRAME_BUTTON, TabFrame } from "@/shell/TabFrame";
 import type { Tab } from "@/shell/tabs";
+import { addTodo } from "@/shell/todos";
 import { useJson } from "@/ui/useJson";
-import type { MeetingSummaryView } from "@/features/meetings/model/Meetings";
+import type { MeetingSummary, MeetingSummaryView } from "@/features/meetings/model/Meetings";
 import type { NuclinoDoc } from "@/features/tools/model/Tools";
 
 const DATE_FORMAT: Intl.DateTimeFormatOptions = { dateStyle: "medium", timeStyle: "short" };
@@ -27,6 +28,51 @@ function Group({ icon, title, empty, children }: { icon: ReactNode; title: strin
 const Tag = ({ children }: { children: ReactNode }) => (
   <span className="ml-1.5 inline-flex rounded bg-zinc-200/70 px-1 text-[11px] text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400">{children}</span>
 );
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** One follow-up, with a button that adds it to your to-dos. */
+function FollowUp({ action, source }: { action: MeetingSummary["actions"][number]; source: { itemId: string; title: string } }) {
+  const [added, setAdded] = useState<"no" | "adding" | "yes">("no");
+  const [failure, setFailure] = useState<string | undefined>(undefined);
+  const due = action.due !== undefined && action.due !== "" ? action.due : undefined;
+  async function add() {
+    setAdded("adding");
+    // A due date Claude wrote as a date becomes the to-do's; anything vaguer ("next week") stays in the text.
+    const isDay = due !== undefined && ISO_DAY.test(due);
+    const outcome = await addTodo({
+      text: due === undefined || isDay ? action.what : `${action.what} (due ${due})`,
+      ...(isDay ? { due } : {}),
+      source: { kind: "meeting", ...source },
+    });
+    setAdded(outcome.ok ? "yes" : "no");
+    setFailure(outcome.ok ? undefined : outcome.error);
+  }
+  return (
+    <li className="group/follow list-disc">
+      {action.what}
+      {action.owner !== undefined && action.owner !== "" && <Tag>{action.owner}</Tag>}
+      {due !== undefined && <Tag>due {due}</Tag>}
+      {added === "yes" ? (
+        <span className="ml-1.5 inline-flex items-center gap-0.5 align-[-1px] text-[11px] text-teal-600 dark:text-teal-400">
+          <Check size={11} aria-hidden />
+          In Todo
+        </span>
+      ) : (
+        <button
+          type="button"
+          disabled={added === "adding"}
+          onClick={() => void add()}
+          className="ml-1.5 inline-flex items-center gap-0.5 align-[-1px] text-[11px] text-zinc-500 opacity-0 hover:text-zinc-900 focus-visible:opacity-100 group-hover/follow:opacity-100 dark:hover:text-zinc-100"
+        >
+          <ListPlus size={11} aria-hidden />
+          Add to Todo
+        </button>
+      )}
+      {failure !== undefined && <span className="ml-1.5 text-[11px] text-red-600 dark:text-red-400">{failure}</span>}
+    </li>
+  );
+}
 
 /** The full note under the summary, read only when you unfold it. */
 function FullNote({ itemId }: { itemId: string }) {
@@ -103,11 +149,7 @@ export function MeetingTab({ tab }: { tab: Extract<Tab, { kind: "meeting" }> }) 
           </Group>
           <Group icon={<ListTodo size={14} className="text-teal-600" aria-hidden />} title="Follow-ups" empty={summary.actions.length === 0}>
             {summary.actions.map((a, i) => (
-              <li key={i} className="list-disc">
-                {a.what}
-                {a.owner !== undefined && a.owner !== "" && <Tag>{a.owner}</Tag>}
-                {a.due !== undefined && a.due !== "" && <Tag>due {a.due}</Tag>}
-              </li>
+              <FollowUp key={`${i}:${a.what}`} action={a} source={{ itemId: tab.itemId, title: view?.title ?? tab.title }} />
             ))}
           </Group>
           <Group icon={<CheckCircle2 size={14} className="text-emerald-600" aria-hidden />} title="Done" empty={summary.done.length === 0}>

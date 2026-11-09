@@ -143,6 +143,7 @@ export function Workbench() {
           else openPathIn("workspace", "", "terminal");
         },
       },
+      { id: "show-todos", title: "Show Todo", group: "View", keys: [], run: () => latest.current.revealSection("todos") },
       { id: "show-github", title: "Show GitHub", group: "View", keys: ["g g"], run: () => latest.current.revealSection("github") },
       // Not in the default sidebars (few use Notion), so this is how to find it before adding it in Settings → Sidebars.
       { id: "show-notion", title: "Show Notion", group: "View", keys: [], run: () => latest.current.revealSection("notion") },

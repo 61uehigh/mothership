@@ -37,6 +37,7 @@ import { summarizeMeeting } from "@/features/meetings/server/meetingSummary";
 import { listMeetingNotes, listNuclinoCollections, readMeetingNote } from "@/features/tools/nuclino/server/nuclinoMeetings";
 import { nuclinoUrl } from "@/features/tools/nuclino/server/nuclinoSource";
 import { SummaryStore } from "@/platform/summaryStore";
+import { TodoStore } from "@/features/todos/server/TodoStore";
 import { runningCheckout } from "@/platform/checkout";
 import { runGit } from "@/platform/git";
 import { HttpError } from "@/platform/http/HttpError";
@@ -56,6 +57,8 @@ type State = {
   runtime: AgentRuntime;
   widgetResults: WidgetResults;
   details: DetailCache;
+  /** Made on first use, so a server running from before to-dos existed gets one after a hot reload. */
+  todos?: TodoStore;
 };
 
 // Widening only: adds our optional slot to `globalThis`, which is otherwise untyped for it.
@@ -428,6 +431,17 @@ export function getUsageLog(): UsageLog {
  */
 export function getUsageTracker(): UsageTracker {
   return state().usage;
+}
+
+/**
+ * ### getTodos
+ *
+ * @returns Your to-do list.
+ */
+export function getTodos(): TodoStore {
+  const current = state();
+  current.todos ??= new TodoStore(dataPath(".mothership", "todos.json"));
+  return current.todos;
 }
 
 /**

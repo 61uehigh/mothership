@@ -90,7 +90,7 @@ export function tabKey(tab: Tab): string {
  * Every section; each can be stacked in a sidebar (see `Sidebars`) and opened
  * full size as a `section` tab.
  */
-export const SECTIONS = ["inbox", "sessions", "files", "github", "docker", "nuclino", "notion", "meetings", "linear", "slack", "calendar"] as const;
+export const SECTIONS = ["inbox", "todos", "sessions", "files", "github", "docker", "nuclino", "notion", "meetings", "linear", "slack", "calendar"] as const;
 
 /**
  * ### SectionId

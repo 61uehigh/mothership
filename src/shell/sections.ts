@@ -1,4 +1,4 @@
-import { BookOpen, Bot, FolderOpen, Inbox, NotebookPen, NotebookText } from "lucide-react";
+import { BookOpen, Bot, FolderOpen, Inbox, ListTodo, NotebookPen, NotebookText } from "lucide-react";
 import type { ComponentType } from "react";
 import { DockerIcon, GitHubIcon, GoogleCalendarIcon, LinearIcon, SlackIcon, type BrandIconProps } from "@/ui/brandIcons";
 import { SECTIONS, type SectionId } from "@/shell/tabs";
@@ -11,6 +11,7 @@ import { SECTIONS, type SectionId } from "@/shell/tabs";
  */
 export const SECTION_INFO: Record<SectionId, { icon: ComponentType<BrandIconProps>; label: string }> = {
   inbox: { icon: Inbox, label: "Inbox" },
+  todos: { icon: ListTodo, label: "Todo" },
   sessions: { icon: Bot, label: "Sessions" },
   files: { icon: FolderOpen, label: "Explorer" },
   github: { icon: GitHubIcon, label: "GitHub" },
@@ -36,7 +37,7 @@ export type Sidebars = { left: Array<SectionId>; right: Array<SectionId> };
  *
  * Development work on the left, everyday work tools on the right.
  */
-export const DEFAULT_SIDEBARS: Sidebars = { left: ["inbox", "sessions", "github", "docker"], right: ["calendar", "slack", "linear", "meetings", "nuclino"] };
+export const DEFAULT_SIDEBARS: Sidebars = { left: ["inbox", "todos", "sessions", "github", "docker"], right: ["calendar", "slack", "linear", "meetings", "nuclino"] };
 
 /**
  * ### normalizeSidebars
@@ -56,6 +57,32 @@ export function normalizeSidebars(saved: unknown): Sidebars {
       : [];
   const { left, right } = saved as { left?: unknown; right?: unknown };
   return { left: side(left), right: side(right) };
+}
+
+/** Sections a layout saved before layouts listed the sections they knew of had seen. */
+const SECTIONS_BEFORE_TRACKING: ReadonlyArray<SectionId> = SECTIONS.filter((s) => s !== "todos");
+
+/**
+ * ### withNewSections
+ *
+ * Adds sections that are new since a layout was saved to the sidebar the
+ * defaults put them in, after the section they follow there, so a new
+ * section shows up without a trip to Settings. Sections you removed stay removed.
+ *
+ * @param seen - The sections the saved layout knew of; untrusted, from browser storage.
+ */
+export function withNewSections(sidebars: Sidebars, seen: unknown): Sidebars {
+  const known = new Set<unknown>(Array.isArray(seen) ? seen : SECTIONS_BEFORE_TRACKING);
+  const next = { left: [...sidebars.left], right: [...sidebars.right] };
+  for (const side of ["left", "right"] as const) {
+    DEFAULT_SIDEBARS[side].forEach((section, index) => {
+      if (known.has(section) || sideOf(next, section) !== undefined) return;
+      const after = DEFAULT_SIDEBARS[side][index - 1];
+      const at = after === undefined ? -1 : next[side].indexOf(after);
+      next[side].splice(at + 1, 0, section);
+    });
+  }
+  return next;
 }
 
 /**

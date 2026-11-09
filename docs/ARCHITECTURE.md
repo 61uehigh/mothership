@@ -18,6 +18,7 @@ src/
     settings/     first-run setup, connections, and your profile
     inbox/        what needs you from every source, sorted by your rules and a daily Claude review
     meetings/     Claude's summaries of meeting notes from the Nuclino collections you choose
+    todos/        your to-do list, kept in .mothership/todos.json
     insights/     your own use of the app: features, entry paths, active time
     feedback/     developer mode: feedback that becomes a session on mothership's own code, and the debug panel
     notifications/, usage/

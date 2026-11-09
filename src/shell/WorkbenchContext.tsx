@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from "react";
-import { DEFAULT_SIDEBARS, normalizeSidebars, sideOf, type Sidebars } from "@/shell/sections";
+import { DEFAULT_SIDEBARS, normalizeSidebars, sideOf, withNewSections, type Sidebars } from "@/shell/sections";
 import { COLLAPSED_BY_DEFAULT, parseTab, SECTIONS, tabKey, type SectionId, type Tab } from "@/shell/tabs";
 import { recordOpen } from "@/shell/usage";
 
@@ -36,7 +36,8 @@ type Layout = {
   rightWidth: number;
 };
 
-type Saved = Layout & { tabs: Array<OpenTab>; activeKey: string | undefined };
+/** `seenSections`: every section there was when saved, so sections added later can join the sidebars. */
+type Saved = Layout & { tabs: Array<OpenTab>; activeKey: string | undefined; seenSections: ReadonlyArray<SectionId> };
 
 const DEFAULT_LAYOUT: Layout = {
   sidebars: DEFAULT_SIDEBARS,
@@ -169,7 +170,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   /** Applies a saved layout, keeping only the parts that are valid now. */
   function restore(saved: Record<string, unknown>) {
     setLayout({
-      sidebars: saved.sidebars === undefined ? DEFAULT_SIDEBARS : normalizeSidebars(saved.sidebars),
+      sidebars: saved.sidebars === undefined ? DEFAULT_SIDEBARS : withNewSections(normalizeSidebars(saved.sidebars), saved.seenSections),
       collapsed: Array.isArray(saved.collapsed)
         ? saved.collapsed.filter((s): s is SectionId => (SECTIONS as ReadonlyArray<unknown>).includes(s))
         : DEFAULT_LAYOUT.collapsed,
@@ -206,7 +207,7 @@ export function WorkbenchProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!restored) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...layout, tabs, activeKey } satisfies Saved));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...layout, tabs, activeKey, seenSections: SECTIONS } satisfies Saved));
     } catch {
       // Layout is a convenience; it just won't survive a reload.
     }

@@ -42,6 +42,7 @@ import { CalendarView } from "@/features/tools/calendar/ui/CalendarView";
 import { DocTab } from "@/features/tools/nuclino/ui/DocTab";
 import { MeetingTab } from "@/features/meetings/ui/MeetingTab";
 import { MeetingsPane } from "@/features/meetings/ui/MeetingsPane";
+import { TodoPane } from "@/features/todos/ui/TodoPane";
 import { EventTab } from "@/features/tools/calendar/ui/EventTab";
 import { IssueTab } from "@/features/tools/linear/ui/IssueTab";
 import { LinearPane } from "@/features/tools/linear/ui/LinearPane";
@@ -162,4 +163,5 @@ export const SECTION_ENTRIES: Record<SectionId, { icon: ComponentType<BrandIconP
   slack: { ...SECTION_INFO.slack, pane: () => <SlackPane /> },
   calendar: { ...SECTION_INFO.calendar, pane: () => <CalendarPane /> },
   inbox: { ...SECTION_INFO.inbox, pane: () => <InboxPane /> },
+  todos: { ...SECTION_INFO.todos, pane: () => <TodoPane /> },
 };
