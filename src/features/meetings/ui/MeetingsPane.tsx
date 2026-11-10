@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronRight, ListTree, ListOrdered, RefreshCw, Sparkles } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { PaneHeader } from "@/shell/PaneHeader";
 import { useWorkbench } from "@/shell/WorkbenchContext";
 import { relativeTime } from "@/ui/format";
@@ -11,6 +11,8 @@ import { useStoredState, writeStoredState } from "@/ui/useStoredState";
 import type { MeetingNote, MeetingsView } from "@/features/meetings/model/Meetings";
 
 const CLOCK_TICK_MS = 30_000;
+/** How long the list waits before reading a collection Nuclino is rate limiting again. */
+const RATE_LIMIT_RETRY_MS = 15_000;
 /** Notes shown per collection before "Show more". */
 const SHOWN = 8;
 /** Notes shown in the merged list before "Show more". */
@@ -83,6 +85,14 @@ export function MeetingsPane() {
   const [layout, setLayout] = useStoredState<Layout>(LAYOUT_KEY, "grouped", parseLayout);
   const [showAllMerged, setShowAllMerged] = useState(false);
   const view = fetched.data;
+  // A collection Nuclino is rate limiting comes back on its own; meanwhile the server answers without calling it.
+  const { reload } = fetched;
+  const rateLimited = view?.collections.some((c) => c.rateLimited === true) === true;
+  useEffect(() => {
+    if (!rateLimited) return;
+    const timer = setTimeout(reload, RATE_LIMIT_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [rateLimited, view, reload]);
   function openMeetingSettings() {
     // The Settings tab opens on the page it last showed.
     writeStoredState("mothership.settings.page", "meetings");

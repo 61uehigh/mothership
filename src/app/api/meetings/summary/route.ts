@@ -14,7 +14,9 @@ const querySchema = z.object({ id: z.uuid({ error: "id must be a Nuclino item UU
  * with `?fresh=1`.
  *
  * @returns `MeetingSummaryView`; 404 for an unknown note, 409 when Nuclino
- *   is not set up, 422 for an empty note, 502 when Nuclino or Claude fails.
+ *   is not set up, 422 for an empty note, 429 (code `rate_limited`) while
+ *   Nuclino is rate limiting and the note is not cached, 502 when Nuclino or
+ *   Claude fails.
  */
 export async function GET(request: Request): Promise<Response> {
   await connection();

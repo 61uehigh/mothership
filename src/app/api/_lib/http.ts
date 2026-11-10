@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { HttpError } from "@/platform/http/HttpError";
+import { RATE_LIMITED_CODE } from "@/platform/mcp/RateLimitGate";
 import type { ToolOutcome } from "@/features/tools/server/DashboardService";
 
 /**
@@ -49,7 +50,8 @@ export function errorResponse(error: unknown): Response {
  * @param what - What was requested, for messages, e.g. `Nuclino doc 1234`.
  * @returns 200 with the value; 409 when the tool is not set up; 404 when the
  *   tool says the item does not exist (a `ToolNotFoundError` from the loader);
- *   502 for any other tool failure. Error bodies are `{ error }`.
+ *   429 with code `rate_limited` while the tool is rate limiting; 502 for any
+ *   other tool failure. Error bodies are `{ error, code? }`.
  */
 export function respondWith<T>(outcome: ToolOutcome<T>, what: string): Response {
   switch (outcome.status) {
@@ -58,8 +60,8 @@ export function respondWith<T>(outcome: ToolOutcome<T>, what: string): Response 
     case "unavailable":
       return Response.json({ error: `Can't load ${what}: ${outcome.reason}` }, { status: 409 });
     case "error":
-      return outcome.notFound
-        ? Response.json({ error: `${what} was not found or you don't have access to it.` }, { status: 404 })
-        : Response.json({ error: outcome.message }, { status: 502 });
+      if (outcome.notFound) return Response.json({ error: `${what} was not found or you don't have access to it.` }, { status: 404 });
+      if (outcome.retryAt !== undefined) return Response.json({ error: outcome.message, code: RATE_LIMITED_CODE }, { status: 429 });
+      return Response.json({ error: outcome.message }, { status: 502 });
   }
 }

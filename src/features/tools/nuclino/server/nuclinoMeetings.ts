@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { MeetingCollection, MeetingNote, NuclinoCollectionChoice } from "@/features/meetings/model/Meetings";
 import { toGfm } from "@/features/tools/nuclino/server/nuclinoDoc";
 import { isoToEpoch, parseJson, truncate } from "@/features/tools/server/sourceUtils";
+import { isRateLimited } from "@/platform/mcp/RateLimitGate";
 import type { ToolCaller } from "@/platform/mcp/ToolCaller";
 
 /** Item reads are reused this long, so browsing collections does not refetch every note. */
@@ -12,14 +13,10 @@ const ITEM_CACHE_MS = 5 * 60_000;
  * limit. Opening a note always reads it fresh.
  */
 const LISTED_NOTE_CACHE_MS = 60 * 60_000;
-/** After Nuclino says "too many requests", calls wait this long, answering from the cache meanwhile. */
-const RATE_LIMIT_PAUSE_MS = 60_000;
 /** Notes read per collection at most. Nuclino keeps children in sidebar order, so both ends are read. */
 const NOTES_PER_COLLECTION = 40;
 /** Item reads in flight at once. */
 const CONCURRENCY = 4;
-
-const RATE_LIMITED = /rate limit|too many requests|\b429\b/i;
 
 // Shape of `get_item` output (checked against real calls): collections carry `childIds`.
 const itemSchema = z.object({
@@ -37,46 +34,27 @@ const workspaceSchema = z.array(z.object({ id: z.string(), name: z.string(), chi
 type Item = z.infer<typeof itemSchema>;
 
 const itemCache = new Map<string, { at: number; item: Item }>();
-/** Epoch milliseconds until which Nuclino is not called, after it reported a rate limit. */
-let pausedUntil = 0;
-
-/**
- * ### NuclinoRateLimitError
- *
- * Nuclino refused calls for making too many; they resume after a minute.
- */
-export class NuclinoRateLimitError extends Error {
-  constructor(options?: ErrorOptions) {
-    super("Nuclino is limiting requests right now. Try again in a minute.", options);
-    this.name = "NuclinoRateLimitError";
-  }
-}
 
 /**
  * ### readNuclinoItem
  *
  * One item, from the cache when it is younger than `maxAgeMs`. While Nuclino
- * is rate limiting, an older cached copy is used instead of calling it.
+ * is rate limiting, an older cached copy is used instead. (The caller holds
+ * back calls during the pause, so those cost no request.)
  *
  * @param maxAgeMs - `0` reads fresh.
- * @throws NuclinoRateLimitError When Nuclino is rate limiting and the item is not cached.
- * @throws Error When the call fails or the output is not the expected JSON.
+ * @throws Error When the call fails (a rate limit too, when the item is not
+ *   cached) or the output is not the expected JSON.
  */
 export async function readNuclinoItem(caller: ToolCaller, itemId: string, maxAgeMs = ITEM_CACHE_MS): Promise<Item> {
   const cached = itemCache.get(itemId);
   if (cached !== undefined && Date.now() - cached.at < maxAgeMs) return cached.item;
-  if (Date.now() < pausedUntil) {
-    if (cached !== undefined) return cached.item;
-    throw new NuclinoRateLimitError();
-  }
   let text: string;
   try {
     text = await caller.callText("get_item", { itemId });
   } catch (error) {
-    if (!(error instanceof Error && RATE_LIMITED.test(error.message))) throw error;
-    pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
-    if (cached !== undefined) return cached.item;
-    throw new NuclinoRateLimitError({ cause: error });
+    if (cached !== undefined && isRateLimited(error)) return cached.item;
+    throw error;
   }
   const parsed = itemSchema.safeParse(parseJson(text));
   if (!parsed.success) throw new Error(`Could not parse the Nuclino response: ${truncate(text, 200)}`);
@@ -152,7 +130,8 @@ export async function listMeetingNotes(
       await mapLimited(picked, async (id) => {
         const known = itemCache.get(id)?.item;
         return readNuclinoItem(caller, id, known?.type === "item" ? LISTED_NOTE_CACHE_MS : collectionAge).catch((error: unknown) => {
-          if (error instanceof NuclinoRateLimitError) throw error;
+          // A partial list would look complete; say Nuclino is limiting instead.
+          if (isRateLimited(error)) throw error;
           return undefined;
         });
       })

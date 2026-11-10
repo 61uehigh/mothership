@@ -3,6 +3,7 @@ import type { DashboardConfig } from "@/features/tools/server/DashboardConfig";
 import { isToolWidget, type SourceContext, type ToolSource, type ToolSources, type ToolWidget } from "@/features/tools/server/ToolSource";
 import type { McpConfig, McpServer } from "@/platform/mcp/McpRegistry";
 import { ToolNotFoundError, withSignal, type ToolCaller } from "@/platform/mcp/ToolCaller";
+import { ToolRateLimitError } from "@/platform/mcp/RateLimitGate";
 
 // Search answers while you type, so it gives up sooner than a widget or a detail view.
 const MCP_SEARCH_TIMEOUT_MS = 10_000;
@@ -26,11 +27,12 @@ type Resolved = { ok: true; caller: ToolCaller } | { ok: false; reason: string }
  * - `ok`: `run` finished with `value`.
  * - `unavailable`: no widget of that kind, or its source is not set up.
  * - `error`: the tool was reached but `run` threw; `message` is user-facing.
+ *   `retryAt` is set when the tool is rate limiting: when calls resume.
  */
 export type ToolOutcome<T> =
   | { status: "ok"; value: T }
   | { status: "unavailable"; reason: string }
-  | { status: "error"; message: string; notFound: boolean };
+  | { status: "error"; message: string; notFound: boolean; retryAt?: number };
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -321,7 +323,12 @@ export class DashboardService {
           : await withDeadline(timeoutFor(widget, "load"), (signal) => run(withSignal(resolved.caller, signal)));
       return { status: "ok", value };
     } catch (error) {
-      return { status: "error", message: message(error), notFound: error instanceof ToolNotFoundError };
+      return {
+        status: "error",
+        message: message(error),
+        notFound: error instanceof ToolNotFoundError,
+        ...(error instanceof ToolRateLimitError ? { retryAt: error.retryAt } : {}),
+      };
     }
   }
 }

@@ -1,9 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServer } from "@/platform/mcp/McpRegistry";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallOptions, ToolCaller } from "@/platform/mcp/ToolCaller";
+import { isRateLimited } from "@/platform/mcp/RateLimitGate";
 
 const CALL_TIMEOUT_MS = 20_000;
 
@@ -160,13 +161,15 @@ export class McpClientPool {
    * errors leave the connection alone (other calls may be using it); only a
    * broken connection is closed so the next call reconnects. A rate limit on
    * an open connection keeps it too: reconnecting would only add requests.
+   * (One during connect leaves nothing to keep; the failed connection is
+   * already dropped.)
    *
    * @param connected - The connection was made, and the call on it failed.
    */
   #failure(server: McpServer, client: Promise<Client>, error: unknown, connected: boolean): McpCallError {
     const detail = error instanceof Error ? error.message : String(error);
-    if (connected && error instanceof StreamableHTTPError && error.code === 429) {
-      return new McpCallError(`${server.name} is rate limiting requests: ${detail}`, { cause: error });
+    if (isRateLimited(error)) {
+      return new McpCallError(`${server.name} is rate limiting requests${connected ? "" : " (while connecting)"}: ${detail}`, { cause: error });
     }
     if (error instanceof McpError && error.code !== ErrorCode.ConnectionClosed) {
       return new McpCallError(

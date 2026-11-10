@@ -42,9 +42,11 @@ export type MeetingNote = {
  * ### MeetingsView
  *
  * The chosen collections with their newest notes, as the browser gets them.
+ * `rateLimited` marks an `error` that is Nuclino rate limiting, which the
+ * list retries on its own.
  */
 export type MeetingsView = {
-  collections: Array<MeetingCollection & { notes: Array<MeetingNote>; error: string | undefined }>;
+  collections: Array<MeetingCollection & { notes: Array<MeetingNote>; error: string | undefined; rateLimited?: boolean }>;
 };
 
 /**

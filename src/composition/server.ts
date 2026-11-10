@@ -19,6 +19,7 @@ import { TOOL_SOURCES } from "@/features/tools/server/toolSources";
 import { UsageTracker } from "@/features/usage/server/UsageTracker";
 import { connectorCaller } from "@/platform/mcp/ClaudeConnectorRelay";
 import { McpClientPool } from "@/platform/mcp/McpClientPool";
+import { RATE_LIMITED_CODE, RateLimitGate } from "@/platform/mcp/RateLimitGate";
 import { loadMcpConfig, type McpConfig } from "@/platform/mcp/McpRegistry";
 import type { ToolCaller } from "@/platform/mcp/ToolCaller";
 import { appPath, dataPath, workspaceDir } from "@/platform/paths";
@@ -59,6 +60,8 @@ type State = {
   details: DetailCache;
   /** Made on first use, so a server running from before to-dos existed gets one after a hot reload. */
   todos?: TodoStore;
+  /** Made on first use, like `todos`, and again after a hot reload of its class. */
+  rateLimits?: RateLimitGate;
 };
 
 // Widening only: adds our optional slot to `globalThis`, which is otherwise untyped for it.
@@ -122,7 +125,15 @@ function state(): State {
       details: new DetailCache(),
     };
   }
-  return globalRef.__mothership;
+  const current = globalRef.__mothership;
+  // A hot reload of McpClientPool leaves the old instance running the old code; swap in a new one.
+  if (!(current.pool instanceof McpClientPool)) {
+    // Typed as the new class, but its methods are the old ones; `retain` is on both.
+    const stale: Pick<McpClientPool, "retain"> = current.pool;
+    void stale.retain(new Set());
+    current.pool = new McpClientPool();
+  }
+  return current;
 }
 
 /**
@@ -318,7 +329,9 @@ const versionOf = (updatedAt: number | undefined) => String(updatedAt ?? 0);
 async function withNuclino<T>(run: (caller: ToolCaller) => Promise<T>): Promise<T> {
   const outcome = await getDashboard().callTool("nuclino", run);
   if (outcome.status === "ok") return outcome.value;
-  throw outcome.status === "unavailable" ? new HttpError(outcome.reason, 409) : new HttpError(outcome.message, outcome.notFound ? 404 : 502);
+  if (outcome.status === "unavailable") throw new HttpError(outcome.reason, 409);
+  if (outcome.retryAt !== undefined) throw new HttpError(outcome.message, 429, RATE_LIMITED_CODE);
+  throw new HttpError(outcome.message, outcome.notFound ? 404 : 502);
 }
 
 /**
@@ -342,7 +355,8 @@ export async function loadMeetings(refresh: boolean): Promise<MeetingsView> {
         });
         return { ...collection, notes, error: undefined };
       } catch (error) {
-        return { ...collection, notes: [], error: error instanceof Error ? error.message : String(error) };
+        const rateLimited = error instanceof HttpError && error.code === RATE_LIMITED_CODE;
+        return { ...collection, notes: [], error: error instanceof Error ? error.message : String(error), ...(rateLimited ? { rateLimited } : {}) };
       }
     }),
   );
@@ -453,9 +467,16 @@ export function getDetailCache(): DetailCache {
   return state().details;
 }
 
+/** One for every route, so a tool's rate limit holds back all of its callers. */
+function rateLimits(): RateLimitGate {
+  const current = state();
+  if (!(current.rateLimits instanceof RateLimitGate)) current.rateLimits = new RateLimitGate();
+  return current.rateLimits;
+}
+
 function connector(name: string): ToolCaller {
   const { usage } = state();
-  return connectorCaller(name, { onRateLimit: (info) => usage.recordClaude(info) });
+  return rateLimits().wrap(connectorCaller(name, { onRateLimit: (info) => usage.recordClaude(info) }));
 }
 
 /**
@@ -469,7 +490,7 @@ export function getDashboard(): DashboardService {
     sources: TOOL_SOURCES,
     loadConfig: dashboardConfig,
     mcpConfig,
-    mcpCaller: (server) => pool.caller(server),
+    mcpCaller: (server) => rateLimits().wrap(pool.caller(server)),
     connectorCaller: connector,
     results: widgetResults,
   });

@@ -101,6 +101,11 @@ export type Fetched<T, C extends string = string> = {
   reload: () => void;
 };
 
+/** The `code` our routes answer with (status 429) while a tool is rate limiting. */
+const RATE_LIMITED = "rate_limited";
+/** How long a view waits before trying a rate-limited route again. */
+const RATE_LIMIT_RETRY_MS = 15_000;
+
 type Settled<T, C extends string> = { url: string; data: T | undefined; failure: ApiFailure<C> | undefined };
 
 function useFetch<T, C extends string>(
@@ -169,10 +174,20 @@ function useFetch<T, C extends string>(
   const reload = useCallback(() => setReloadRequest((r) => ({ url, count: r.count + 1 })), [url]);
 
   const current = settled?.url === url ? settled : undefined;
+  const failure = current?.failure;
+
+  // A rate-limited tool comes back on its own, so try again rather than wait for a click. Until the
+  // pause is over the server answers without calling the tool, so trying costs the tool nothing.
+  useEffect(() => {
+    if (url === undefined || failure?.code !== RATE_LIMITED) return;
+    const timer = setTimeout(() => load(url, false, true), RATE_LIMIT_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [url, failure, load]);
+
   return {
     data: current !== undefined ? current.data : keepPrevious ? settled?.data : undefined,
-    error: current?.failure?.error,
-    failure: current?.failure,
+    error: failure?.error,
+    failure,
     loading: url !== undefined && (current === undefined || inflight === url),
     reload,
   };
@@ -184,7 +199,8 @@ function useFetch<T, C extends string>(
  * Loads one of our own JSON routes and keeps it current: aborts the request
  * when the URL changes or the caller unmounts, never shows an answer for an
  * older URL, and with `pollMs` refetches on an interval, skipping a tick
- * while the previous request is still in flight.
+ * while the previous request is still in flight. A route that answers
+ * `rate_limited` is tried again every 15 seconds.
  *
  * @param url - Same-origin API URL; changing it loads the new one. `undefined` waits without loading.
  */

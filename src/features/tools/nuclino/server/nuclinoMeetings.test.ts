@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { listMeetingNotes, listNuclinoCollections, NuclinoRateLimitError, readMeetingNote } from "@/features/tools/nuclino/server/nuclinoMeetings";
+import { listMeetingNotes, listNuclinoCollections, readMeetingNote } from "@/features/tools/nuclino/server/nuclinoMeetings";
+import { RateLimitGate, ToolRateLimitError } from "@/platform/mcp/RateLimitGate";
 import type { ToolCaller } from "@/platform/mcp/ToolCaller";
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -73,17 +74,27 @@ describe("readMeetingNote", () => {
   });
 });
 
-// Last: the pause it starts holds for every test after it.
 describe("rate limits", () => {
-  it("pauses calls after a rate limit, answering from the cache meanwhile", async () => {
+  it("answers from the cache while Nuclino is rate limiting, and stops calling it", async () => {
     await readMeetingNote(fakeNuclino(), id(11));
     const limited = fakeNuclino();
     limited.callText = async (tool, args) => {
       limited.calls.push(`${tool}:${String(args.itemId ?? "")}`);
-      throw new Error('Streamable HTTP error: Error POSTing to endpoint: {"status":"fail","message":"You\'ve made too many requests and hit a rate limit"}');
+      throw new Error('Could not connect to nuclino: Streamable HTTP error: Error POSTing to endpoint: {"status":"fail","message":"You\'ve made too many requests and hit a rate limit"}');
     };
-    expect((await readMeetingNote(limited, id(11))).title).toBe("2026-01-12");
-    await expect(readMeetingNote(limited, id(30))).rejects.toBeInstanceOf(NuclinoRateLimitError);
+    const gated = new RateLimitGate().wrap(limited);
+    expect((await readMeetingNote(gated, id(11))).title).toBe("2026-01-12");
+    await expect(readMeetingNote(gated, id(30))).rejects.toBeInstanceOf(ToolRateLimitError);
     expect(limited.calls).toEqual([`get_item:${id(11)}`]);
+  });
+
+  it("fails a listing rather than leave out notes it could not read", async () => {
+    const limited = fakeNuclino();
+    // The collection is read; the limit hits on its notes.
+    limited.callText = async (tool, args) => {
+      if (args.itemId === id(40)) return JSON.stringify({ type: "collection", id: id(40), title: "New", childIds: [id(41), id(42)] });
+      throw new ToolRateLimitError("Nuclino", Date.now() + 30_000);
+    };
+    await expect(listMeetingNotes(limited, { id: id(40), title: "New", workspace: "Operation" }, () => false, true)).rejects.toThrow(/rate limiting/);
   });
 });
