@@ -1,0 +1,38 @@
+{
+  "appId": "io.github.61uehigh.mothership",
+  "productName": "Mothership",
+  "npmRebuild": false,
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": [
+          "arm64"
+        ]
+      }
+    ],
+    "category": "public.app-category.developer-tools",
+    "identity": "-",
+    "hardenedRuntime": false
+  },
+  "dmg": {
+    "artifactName": "Mothership-${version}-${arch}.dmg"
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "signExecutable": false
+  },
+  "nsis": {
+    "oneClick": true,
+    "perMachine": false,
+    "deleteAppDataOnUninstall": false,
+    "artifactName": "Mothership-Setup-${version}-${arch}.${ext}"
+  }
+}
