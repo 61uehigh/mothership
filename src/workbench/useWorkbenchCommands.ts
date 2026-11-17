@@ -5,7 +5,6 @@ import { openPathIn } from "@/features/explorer/ui/openPath";
 import { openIn } from "@/features/sessions/ui/openIn";
 import { useCommands, type Command } from "@/shell/commands/CommandProvider";
 import { shiftSection, sideOf, type SectionPlace } from "@/shell/sections";
-import { openSettingsPage } from "@/shell/settingsPage";
 import { isSectionId, type SectionId } from "@/shell/tabs";
 import { newTodoTab } from "@/shell/todos";
 import { useWorkbench, type Workbench } from "@/shell/WorkbenchContext";
@@ -116,7 +115,7 @@ export function useWorkbenchCommands(): void {
       { id: "show-todos", title: "Show Todo", group: "View", keys: [], run: () => latest.current.revealSection("todos") },
       { id: "new-todo", title: "New to-do (title and notes)", group: "Todo", keys: ["shift+t"], featured: true, run: () => latest.current.open(newTodoTab()) },
       { id: "show-github", title: "Show GitHub", group: "View", keys: ["g g"], run: () => latest.current.revealSection("github") },
-      // Not in the default sidebars (few use Notion), so this is how to find it before adding it in Settings → Sidebars.
+      // Not in the default sidebars (few use Notion), so this is how to find it before adding it in Settings → Workspace → Sidebars.
       { id: "show-notion", title: "Show Notion", group: "View", keys: [], run: () => latest.current.revealSection("notion") },
       {
         id: "open-settings",
@@ -129,19 +128,17 @@ export function useWorkbenchCommands(): void {
       { id: "open-insights", title: "Open Insights", group: "View", keys: [], run: () => latest.current.open({ kind: "insights" }) },
       {
         id: "open-usage",
-        title: "Open usage",
+        title: "Open agent limits",
         group: "View",
         keys: [],
-        // Settings → Usage: Claude and Codex limits, the status bar's left side in detail.
-        run: () => openSettingsPage("usage", () => latest.current.open({ kind: "settings" })),
+        run: () => latest.current.open({ kind: "agent-limits" }),
       },
       {
         id: "open-system",
-        title: "Open system",
+        title: "Open This Mac",
         group: "View",
         keys: [],
-        // Settings → This Mac: CPU, memory, disk, and battery, the status bar's right side in detail.
-        run: () => openSettingsPage("system", () => latest.current.open({ kind: "settings" })),
+        run: () => latest.current.open({ kind: "system" }),
       },
       // Keyboard counterparts of dragging a section's header; they act on the focused section.
       {

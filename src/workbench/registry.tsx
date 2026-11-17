@@ -11,6 +11,8 @@ import {
   FileText,
   GitCompare,
   GitPullRequest,
+  Gauge,
+  Laptop,
   MessageCircleQuestion,
   LayoutGrid,
   MessageSquare,
@@ -37,6 +39,8 @@ import { GraphTab } from "@/features/sessions/ui/GraphTab";
 import { SessionInfo } from "@/features/sessions/ui/SessionInfo";
 import { SessionsPane } from "@/features/sessions/ui/SessionsPane";
 import { SessionView } from "@/features/sessions/ui/SessionView";
+import { SystemPage } from "@/features/settings/ui/pages/SystemPage";
+import { UsagePage } from "@/features/settings/ui/pages/UsagePage";
 import { SettingsTab } from "@/features/settings/ui/SettingsTab";
 import { CalendarPane } from "@/features/tools/calendar/ui/CalendarPane";
 import { CalendarView } from "@/features/tools/calendar/ui/CalendarView";
@@ -131,6 +135,8 @@ export const TABS: { [K in TabKind]: TabEntry<K> } = {
   event: { icon: CalendarDays, title: (tab) => tab.title, render: (tab) => <EventTab key={tab.eventId} tab={tab} /> },
   calendar: { icon: CalendarDays, title: () => "Calendar", render: () => <CalendarView /> },
   settings: { icon: Settings, title: () => "Settings", render: () => <SettingsTab /> },
+  "agent-limits": { icon: Gauge, title: () => "Agent limits", render: () => <UsagePage /> },
+  system: { icon: Laptop, title: () => "This Mac", render: () => <SystemPage /> },
   insights: { icon: BarChart3, title: () => "Insights", render: () => <InsightsTab /> },
   debug: { icon: Bug, title: () => "Debug", render: () => <DebugTab /> },
   container: { icon: Container, title: (tab) => tab.name, render: (tab) => <ContainerTab key={tab.id} tab={tab} /> },

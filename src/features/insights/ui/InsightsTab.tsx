@@ -44,6 +44,8 @@ const KIND_LABEL: Record<Exclude<TabKind, "section">, string> = {
   event: "Calendar event",
   calendar: "Calendar",
   settings: "Settings",
+  "agent-limits": "Agent limits",
+  system: "This Mac",
   insights: "Insights",
   debug: "Debug panel",
   container: "Docker container",

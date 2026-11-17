@@ -27,6 +27,8 @@ export type Tab =
   | { kind: "event"; eventId: string; title: string }
   | { kind: "calendar" }
   | { kind: "settings" }
+  | { kind: "agent-limits" }
+  | { kind: "system" }
   | { kind: "insights" }
   | { kind: "debug" }
   | { kind: "section"; section: SectionId }
@@ -52,6 +54,8 @@ export function tabKey(tab: Tab): string {
     case "graph":
     case "calendar":
     case "settings":
+    case "agent-limits":
+    case "system":
     case "insights":
     case "debug":
       return tab.kind;
@@ -139,6 +143,8 @@ const tabSchema: z.ZodType<Tab> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("event"), eventId: text, title: z.string() }),
   z.object({ kind: z.literal("calendar") }),
   z.object({ kind: z.literal("settings") }),
+  z.object({ kind: z.literal("agent-limits") }),
+  z.object({ kind: z.literal("system") }),
   z.object({ kind: z.literal("insights") }),
   z.object({ kind: z.literal("debug") }),
   z.object({ kind: z.literal("section"), section: z.enum(SECTIONS) }),

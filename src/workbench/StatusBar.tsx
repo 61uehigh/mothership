@@ -4,7 +4,6 @@ import { Bell, BellOff, RotateCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { NotificationState } from "@/features/notifications/model/NotificationState";
 import { isUsageStale, type ProviderUsage, type UsageSnapshot, type UsageWindow } from "@/features/usage/model/Usage";
-import type { SettingsPageId } from "@/features/settings/model/Settings";
 import { openSettingsPage } from "@/shell/settingsPage";
 import { useWorkbenchActions } from "@/shell/WorkbenchContext";
 import { MeterBar, MeterPercent } from "@/ui/meter";
@@ -36,7 +35,7 @@ function Meter({
   className?: string;
 }) {
   return (
-    <button type="button" onClick={onOpen} className={`${className} items-center gap-1.5 rounded hover:text-zinc-900 dark:hover:text-zinc-100 ${stale ? "opacity-50" : ""}`} title={`${title}. Click for details in Settings`}>
+    <button type="button" onClick={onOpen} className={`${className} items-center gap-1.5 rounded hover:text-zinc-900 dark:hover:text-zinc-100 ${stale ? "opacity-50" : ""}`} title={`${title}. Click for details`}>
       <span className="text-zinc-500">{label}</span>
       <MeterBar percent={percent} className="h-1.5 w-8 sm:w-12" />
       <MeterPercent percent={percent} className="w-8 text-right" />
@@ -93,7 +92,8 @@ export function StatusBar({
   const now = useNow(CLOCK_TICK_MS);
   const visible = usePageVisible();
   const workbench = useWorkbenchActions();
-  const open = (page: SettingsPageId) => openSettingsPage(page, () => workbench.open({ kind: "settings" }));
+  const openAgentLimits = () => workbench.open({ kind: "agent-limits" });
+  const openSystem = () => workbench.open({ kind: "system" });
 
   const load = useCallback(async (probe: boolean) => {
     // A failed load (the server restarting, say) keeps the last numbers; the next poll tries again.
@@ -115,7 +115,7 @@ export function StatusBar({
 
   return (
     <footer data-usage-area="statusbar" className="flex items-center gap-x-3 overflow-hidden border-t border-zinc-200 px-3 py-1.5 text-[11px] whitespace-nowrap sm:gap-x-4 sm:px-4 dark:border-zinc-800">
-      <ProviderMeters name="Claude" usage={usage?.claude} now={now} onOpen={() => open("usage")} />
+      <ProviderMeters name="Claude" usage={usage?.claude} now={now} onOpen={openAgentLimits} />
       <button
         type="button"
         disabled={probing}
@@ -128,10 +128,10 @@ export function StatusBar({
       >
         <RotateCw size={12} aria-label="Check Claude limits" />
       </button>
-      <ProviderMeters name="Codex" usage={usage?.codex} now={now} onOpen={() => open("usage")} />
+      <ProviderMeters name="Codex" usage={usage?.codex} now={now} onOpen={openAgentLimits} />
       <span className="ml-auto flex shrink-0 items-center gap-4">
-        <Meter className="hidden xl:flex" label="CPU" percent={usage?.cpuPercent} stale={false} onOpen={() => open("system")} title="Average CPU usage over the last 30 seconds" />
-        <Meter className="hidden xl:flex" label="MEM" percent={usage?.memoryPercent} stale={false} onOpen={() => open("system")} title="Memory usage (excluding cache)" />
+        <Meter className="hidden xl:flex" label="CPU" percent={usage?.cpuPercent} stale={false} onOpen={openSystem} title="Average CPU usage over the last 30 seconds" />
+        <Meter className="hidden xl:flex" label="MEM" percent={usage?.memoryPercent} stale={false} onOpen={openSystem} title="Memory usage (excluding cache)" />
         {notifications !== "unsupported" && (
           <button
             type="button"
@@ -153,8 +153,8 @@ export function StatusBar({
         )}
         <button
           type="button"
-          onClick={() => open("profile")}
-          title="This Mac's time. Your time zone for the calendar is in Settings → You"
+          onClick={() => openSettingsPage("profile", () => workbench.open({ kind: "settings" }))}
+          title="This Mac's time. Your time zone for the calendar is in Settings → Profile"
           className="hidden font-mono tabular-nums text-zinc-500 hover:text-zinc-900 sm:inline dark:hover:text-zinc-100"
         >
           {now > 0 && new Date(now).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })}
