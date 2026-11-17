@@ -135,7 +135,7 @@ describe("kakaoMacSteps", () => {
   });
 
   it("has both permissions once the window could be read", () => {
-    expect(kakaoMacSteps({ state: "no-list", unread: undefined })).toEqual({ appOpen: true, accessibility: true, automation: true, chatsTab: false });
+    expect(kakaoMacSteps({ state: "no-list", windows: 1, unread: undefined })).toEqual({ appOpen: true, accessibility: true, automation: true, chatsTab: false });
     expect(kakaoMacSteps({ state: "ok", chats: [], unread: 0 })).toEqual({ appOpen: true, accessibility: true, automation: true, chatsTab: true });
     expect(kakaoMacChip({ state: "ok", chats: [], unread: 0 }).state).toBe("connected");
     expect(kakaoMacChip({ state: "no-access", missing: "automation", unread: undefined })).toMatchObject({ state: "not-set-up", tone: "warn" });
