@@ -1,0 +1,64 @@
+# Builds the Windows x64 installer on a Windows runner. The exe is not signed
+# (builder.json sets signExecutable: false) and keeps Electron's icon. Run it
+# from the Actions tab, or push a v* tag; the installer is attached to the run
+# as an artifact.
+name: Windows installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The checks on Windows, apart from the build: they show path handling that
+  # only breaks there, without holding back the installer.
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Route types such as RouteContext are generated, not committed.
+      - run: pnpm exec next typegen
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec eslint src scripts electron
+      - run: node scripts/check-boundaries.mjs
+      - run: pnpm exec vitest run
+
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      # The version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the installer
+        run: pnpm app:build --win
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Mothership-Setup-windows-x64
+          path: dist/app/Mothership-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 14

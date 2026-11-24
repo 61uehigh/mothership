@@ -1,0 +1,36 @@
+# Type check, lint, layer boundaries, and unit tests on every push and pull
+# request. macOS is where the app is built and used day to day; windows.yml
+# runs the same checks on Windows when an installer is built.
+name: Check
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The version comes from packageManager in package.json.
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Route types such as RouteContext are generated, not committed.
+      - run: pnpm exec next typegen
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm exec eslint src scripts electron
+      - run: node scripts/check-boundaries.mjs
+      - run: pnpm exec vitest run
