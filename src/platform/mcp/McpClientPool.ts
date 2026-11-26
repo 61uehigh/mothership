@@ -53,7 +53,7 @@ export class McpClientPool {
     if (existing !== undefined) void this.#close(server.name);
 
     const client = (async () => {
-      const instance = new Client({ name: "mothership", version: "0.1.0" });
+      const instance = new Client({ name: "mothership", version: "1.0.0" });
       await instance.connect(transportFor(server));
       return instance;
     })();
